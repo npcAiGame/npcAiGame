@@ -1,6 +1,6 @@
 // --------------------------------------------------------------------------------------
 // 
-// Qianfan_APIMZ_zh.js v1.3
+// Qianfan_APIMZ_zh_generate_yes_or_no.js v1.3
 //
 // Copyright (c) kotonoha*（https://aokikotori.com/）
 // This software is released under the MIT License.
@@ -26,21 +26,6 @@
  * @default sk-
  * @desc 千帆应用的SECRET_KEY如果是数字则为变量ID，如果是字符串则为SECRET_KEY）
  * ※可以将API密钥存储在变量中。
- *
- * @param UserMessageVarId
- * @type variable
- * @default 1
- * @desc 存储玩家提问的变量ID
- *
- * @param AnswerMessageVarId
- * @type variable
- * @default 2
- * @desc 存储AI回答的变量ID
- *
- * @param MemoryMessageVarId
- * @type variable
- * @default 3
- * @desc 存储回答历史的变量ID
  *
  * @param VisibleSwitchID
  * @type switch
@@ -138,18 +123,6 @@
  * @desc 保存的对话历史量
  * AI记住的对话内容数量（将1次问题+回答视为1）
 *
- * @arg CustomQuestionMessageVarId
- * @type variable
- * @default
- * @desc 存储此事件的问题的变量ID
- * 如果为空，则使用插件参数的设置。
- *
- * @arg CustomAnswerMessageVarId
- * @type variable
- * @default
- * @desc 存储此事件的回答的变量ID
- * 如果为空，则使用插件参数的设置。
- *
  * @arg CustomMemoryMessageVarId
  * @type variable
  * @default
@@ -206,14 +179,10 @@
  *
  * (2) 需要至少3个空闲的变量ID。
  * ・将玩家的问题临时存储在变量中。
- * 　请将空闲的变量ID设置在参数UserMessageVarId中。
- * ・将AI的回答临时存储在变量中。
- * 　请将空闲的变量ID设置在参数AnswerMessageVarId中。
  * ・将回答历史临时存储在变量中。
- * 　请将空闲的变量ID设置在参数MemoryMessageVarId中。
  *
  * (3) 在您希望AI创作台词的事件中，通过插件命令
- * 选择「Qianfan_APIMZ_zh」并注册角色设置。
+ * 选择「Qianfan_APIMZ_zh_generate_yes_or_no」并注册角色设置。
  * 
  * 【插件命令说明】;
  * # system
@@ -261,7 +230,6 @@
  * 在名称输入窗口或聊天窗口中输入问题时，
  * 如果问题已保存在变量中，请指定该变量ID。
  * ※当这个变量和message同时设置时，message优先。
- * ※与插件参数的UserMessageVarId不同。
  *
  * # CustomAnswerMessageVarId
  * 这是存储此事件回答的变量ID。
@@ -379,19 +347,11 @@
 
 (() => {
 
-	const pluginParameters = PluginManager.parameters('Qianfan_APIMZ_zh');
-	const userMessageVarId = Number(pluginParameters['UserMessageVarId']) || 1;
-	const answerMessageVarId = Number(pluginParameters['AnswerMessageVarId']) || 2;
-	const memoryMessageVarId = Number(pluginParameters['MemoryMessageVarId']) || 3;
+	const pluginParameters = PluginManager.parameters('Qianfan_APIMZ_zh_generate_yes_or_no');
 	const visibleSwitchID = Number(pluginParameters['VisibleSwitchID']) || null;
 	const replacestr = String(pluginParameters['ReplaceStr']) || "";
 	const brstr = pluginParameters['BrStr'] === 'true' || pluginParameters['BrStr'] === true;
-	const systemMessage = String(pluginParameters['SystemMessage']) || "Please answer in Japanese.";
 	const fontFileName = pluginParameters['FontFileName'] || '';
-	console.log(pluginParameters['Layouts'])
-	const layouts = JSON.parse(pluginParameters['Layouts']).map(layout => JSON.parse(layout));
-	const layoutVariableId = Number(pluginParameters['LayoutVariableId']);
-
 	let previousMessage = null;
 	let isDoneReceived = false;
 	let isFontLoaded = false;
@@ -412,19 +372,12 @@
 		});
 	}
 
-	PluginManager.registerCommand("Qianfan_APIMZ_zh", "chat", async (args) => {
-		// 初始化窗口
-		updateStreamingTextElement();
+	PluginManager.registerCommand("Qianfan_APIMZ_zh_generate_yes_or_no", "chat", async (args) => {
 		isDoneReceived = false;
-
 		const temperature = Number(args.temperature) || 1;
 		const top_p = Number(args.top_p) || 0.9;
 		const max_tokens = Number(args.max_tokens) || 512;
-		const customQuestionMessageVarId = Number(args.CustomQuestionMessageVarId) || null;
-		const customAnswerMessageVarId = Number(args.CustomAnswerMessageVarId) || null;
 		const result_id = Number(args.result_id) || 0;
-		let targetVarId = customQuestionMessageVarId !== null ? customQuestionMessageVarId : 0;
-		let variableValue = $gameVariables.value(targetVarId);
 		let userMessage;
 		let displayHeader;
 		let support_message;
@@ -435,96 +388,9 @@
 		const API_KEY =  String(pluginParameters['API_KEY']) || 'sk-';
 		const SECRET_KEY =  String(pluginParameters['SECRET_KEY']) || 'sk-';
 
-		// 如果变量 ID 未定义，则反映问题中的消息
-		if (targetVarId !== 0 && !variableValue) {
-			if (!args.message || args.message === '') { return; }
-			if (!args.message_before) { args.message_before = ''; }
-			if (!args.message_after) { args.message_after = ''; }
-			userMessage = args.message_before + args.message + args.message_after;
-			userMessage_input = args.message;
-		} else if (targetVarId === 0 && (!args.message || args.message === '')) {
-			// 如果变量和消息都为空，则将从进程中删除它。
-			return;
-		} else {
-			// 否则，变量 customQuestionMessageVarId 将反映在问题中
-			if (!args.message_before) { args.message_before = ''; }
-			if (!args.message_after) { args.message_after = ''; }
-			userMessage = variableValue ? args.message_before + variableValue + args.message_after : args.message_before + args.message + args.message_after;
-			userMessage_input = variableValue ? variableValue : args.message;
-		}
 
-		// 处理控制字符
-		userMessage = processControlCharacters(userMessage);
-		$gameVariables.setValue(targetVarId, userMessage);
-
-		if (userMessageVarId !== null) {
-			$gameVariables.setValue(userMessageVarId, userMessage);
-		}
-
-		const customMemoryMessageVarId = Number(args.CustomMemoryMessageVarId) || memoryMessageVarId;
+		const customMemoryMessageVarId = Number(args.CustomMemoryMessageVarId) || 3;
 		let customMemoryMessage = $gameVariables.value(customMemoryMessageVarId);
-
-		// 与内存无关的操作
-		if (Number(args.CustomMemoryMessageVarId) === 0 || !args.memory_talk) {
-			$gameVariables.setValue(memoryMessageVarId, []);
-			previousMessage = "";
-			customMemoryMessage = [];
-			// 推送支持问题和支持答案
-			if (args.support_message && args.support_answer) {
-				customMemoryMessage.push({ role: 'user', content: (processControlCharacters(args.support_message) || "") });
-				customMemoryMessage.push({ role: 'assistant', content: (processControlCharacters(args.support_answer) || "") });
-			}
-			customMemoryMessage.push({ role: 'user', content: userMessage });
-			$gameVariables.setValue(memoryMessageVarId, customMemoryMessage);
-
-		} else {
-			customMemoryMessage = $gameVariables.value(customMemoryMessageVarId);
-
-			if (!Array.isArray(customMemoryMessage)) {
-				customMemoryMessage = [];
-				previousMessage = "";
-				// 推送支持问题和支持答案
-				if (args.support_message && args.support_answer) {
-					customMemoryMessage.push({ role: 'user', content: (processControlCharacters(args.support_message) || "") });
-					customMemoryMessage.push({ role: 'assistant', content: (processControlCharacters(args.support_answer) || "") });
-				}
-				customMemoryMessage.push({ role: 'user', content: userMessage });
-
-			} else {
-
-				// 执行记忆对话的过程
-				const memoryTalk = Number(args.memory_talk) * 2 || 1;
-				customMemoryMessage.push({ role: 'user', content: userMessage });
-
-				while (true) {
-					let userCount = customMemoryMessage.filter(item => item.role === 'user').length;
-					let assistantCount = customMemoryMessage.filter(item => item.role === 'assistant').length;
-
-					if (userCount + assistantCount > memoryTalk) {
-						let userIndex = customMemoryMessage.findIndex(item => item.role === 'user');
-						let assistantIndex = customMemoryMessage.findIndex(item => item.role === 'assistant');
-
-						if (userIndex >= 0 && assistantIndex >= 0) {
-							customMemoryMessage.splice(Math.min(userIndex, assistantIndex), 2);
-						} else {
-							break;
-						}
-					} else {
-						break;
-					}
-				}
-
-			}
-			$gameVariables.setValue(customMemoryMessageVarId, customMemoryMessage);
-		}
-
-		const streamingTextElement = document.getElementById('streamingText');
-		addCustomFontStyle();
-		if ($gameSwitches.value(visibleSwitchID) !== true) {
-			streamingTextElement.style.display = 'block';
-		}
-
-		streamingTextElement.innerHTML = '';
 		//console.log(customMemoryMessage);
 
 		(async () => {
@@ -541,19 +407,22 @@
 					event._moveType = 0;
 				}
 			}
-
+			let nowMemoryMessag = [...customMemoryMessage]
 			try {
 				const accessToken = await getAccessToken(API_KEY,SECRET_KEY);
 				const url = `https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions_pro?access_token=${accessToken}`;
-
+				let stringified = JSON.stringify(customMemoryMessage);
+				nowMemoryMessag.push({ role: 'user', content: args.message })
 				const response = await fetch(url, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
 					},
+
+					
 					body: JSON.stringify({
 						stream: true,
-						messages: customMemoryMessage,
+						messages: nowMemoryMessag,
 						system: String(args.system) || "你是小花"
 					}),
 				});
@@ -582,41 +451,24 @@
 				if (!args.displayHeader) args.displayHeader = "";
 				let preMessage = processControlCharacters(args.displayHeader);
 				preMessage = preMessage.replace(/userMessage/g, userMessage_input);
-
-				// 面部图形设置
-				if (faceImage !== null && faceImage !== "") {
-					if (!faceIndex) { faceIndex = 0; }
-					const faceWidth = 144;
-					const faceHeight = 144;
-					const facesPerRow = 4;
-					const facesPerCol = 2;
-					const faceX = faceWidth * (faceIndex % facesPerRow);
-					const faceY = faceHeight * Math.floor(faceIndex / facesPerRow);
-					const faceImageUrl = '<img src="img/faces/' + faceImage + '.png" style="object-fit: none; object-position: -' + faceX + 'px -' + faceY + 'px; width: ' + faceWidth + 'px; height: ' + faceHeight + 'px; float: left; margin-right: 20px;">';
-					textArray = [preMessage, faceImageUrl];
-				} else {
-					textArray = [preMessage];
-				}
-
-				// 设置角色名称
-				if (args.characterName) {
-					textArray.push(processControlCharacters(args.characterName) + "<br>");
-				}
-
 				// 与 ChatGPT 交流
 				while (true) {
 
 					const { value, done } = await reader.read();
 					if (done) { 
 						previousMessage = streamBuffer;
-						// 将答案分配给变量 ID
-						let targetAnswerVarId = customAnswerMessageVarId !== null ? customAnswerMessageVarId : answerMessageVarId;
+						var obj = JSON.parse(previousMessage); // 将字符串转换为JavaScript对象
+						var answer = obj.答案; // 获取键为"答案"的值
 						// 将答案分配给助理角色
-						customMemoryMessage.push({ role: 'assistant', content: previousMessage });
-						$gameVariables.setValue(targetAnswerVarId, previousMessage);
+						if (answer==0){
+							$gameVariables.setValue(result_id, 0)
+						}
+						else{
+							$gameVariables.setValue(result_id, 1);
+						}
 						// 活动恢复
 						isDoneReceived = true;
-						// unlockControlsIfNeeded();
+						unlockControlsIfNeeded();
 						return;
 					}
 					buffer += textDecoder.decode(value, { stream: true });
@@ -649,19 +501,6 @@
 								// <br>将换行符转换为
 								if (brstr === true) { assistantMessage = assistantMessage.replace(/\n/g, "<br>"); }
 								assistantMessage = removeChars(assistantMessage, replacestr);
-
-								// 输出
-								textArray.push(assistantMessage);
-								const combinedText = textArray.join('');
-								const processedText = processControlCharacters(combinedText);
-								streamingTextElement.innerHTML = processedText;
-								//console.log(textArray);
-
-								// 滚动以适合输出
-								setTimeout(() => {
-									streamingTextElement.scrollTop = streamingTextElement.scrollHeight;
-								}, 0);
-								
 							}
 						}
 					} while (newlineIndex !== -1);
@@ -736,69 +575,6 @@
 			}
 		});
 	}
-
-	// 设置自定义字体
-	function addCustomFontStyle() {
-		if (!isFontLoaded) {
-			const style = document.createElement('style');
-			style.textContent = `#streamingText {font-family: 'customFont';}`;
-			document.head.appendChild(style);
-			isFontLoaded = true;
-		}
-	}
-
-	// 实现等待模式
-	const _Game_Interpreter_updateWaitMode = Game_Interpreter.prototype.updateWaitMode;
-	Game_Interpreter.prototype.updateWaitMode = function () {
-		if (this._waitMode === "waitChatGPT") {
-			const streamingTextElement = document.getElementById("streamingText");
-
-			if (!streamingTextElement) {
-				$gameMap._interpreter.setWaitMode('');
-				if (typeof currentEvent !== 'undefined' && currentEvent) {
-					currentEvent.setDirectionFix(currentEvent._originalDirectionFix);
-					currentEvent._moveType = currentEvent._originalMoveType;
-					currentEvent = null;
-				}
-				isDoneReceived = true;
-				return false;
-			}
-			return true;
-		}
-		return _Game_Interpreter_updateWaitMode.call(this);
-	};
-
-	// 控制窗口滚动以及打开和关闭
-	const scrollSpeed = 30; // 用于调整滚动速度的常量
-	const _Scene_Map_update = Scene_Map.prototype.update;
-	Scene_Map.prototype.update = function () {
-		_Scene_Map_update.call(this);
-		if (streamingTextElement && streamingTextElement.style.display !== "none") {
-			if (Input.isPressed("up")) {
-				streamingTextElement.scrollTop -= scrollSpeed;
-			} else if (Input.isPressed("down")) {
-				streamingTextElement.scrollTop += scrollSpeed;
-			}
-			if ((Input.isTriggered("ok") || Input.isTriggered("cancel") || TouchInput.isCancelled()) && isScrollAtEnd(streamingTextElement)) {
-				unlockControlsIfNeeded();
-			} else {
-				if (Input.isTriggered("ok") || Input.isTriggered("cancel") || TouchInput.isCancelled()) {
-					streamingTextElement.scrollTop = streamingTextElement.scrollHeight;
-				}
-			}
-		}
-	};
-
-	const _Game_Map_isEventRunning = Game_Map.prototype.isEventRunning;
-	Game_Map.prototype.isEventRunning = function () {
-		const isElementVisible = streamingTextElement && streamingTextElement.style.display !== "none";
-		return _Game_Map_isEventRunning.call(this) || isElementVisible;
-	};
-
-	function isScrollAtEnd(element) {
-		return element.scrollTop + element.clientHeight >= element.scrollHeight;
-	}
-
 	// 事件恢复处理
 	function unlockControlsIfNeeded() {
 		if (isDoneReceived && streamingTextElement.scrollHeight - streamingTextElement.clientHeight <= streamingTextElement.scrollTop + 1) {
@@ -824,114 +600,6 @@
 			return "API 密钥不同。 请输入正确的 API 密钥。";
 		} else {
 			return errorMessage;
-		}
-	}
-
-	// 生成流式处理窗口
-	function createStreamingTextElement() {
-		const windowHeight = window.innerHeight;
-		const streamingTextHeight = 200;
-		streamingTextElement = document.createElement('div');
-		streamingTextElement.id = 'streamingText';
-		streamingTextElement.style.display = 'none';
-		streamingTextElement.style.position = 'fixed';
-		streamingTextElement.style.zIndex = 100;
-		streamingTextElement.style.left = '0';
-		streamingTextElement.style.width = '800px';
-		streamingTextElement.style.top = `${windowHeight - streamingTextHeight - 16}px`;
-		streamingTextElement.style.boxSizing = 'border-box';
-		streamingTextElement.style.boxShadow = '';
-		streamingTextElement.style.height = '200px';
-		streamingTextElement.style.color = 'white';
-		streamingTextElement.style.fontSize = '22px';
-		streamingTextElement.style.padding = '16px';
-		streamingTextElement.style.background = 'linear-gradient(to bottom, rgba(15,28,69,0.8), rgba(8,59,112,0.8))';
-		streamingTextElement.style.margin = '0 8px';
-		streamingTextElement.style.borderWidth = '2px';
-		streamingTextElement.style.borderStyle = 'solid';
-		streamingTextElement.style.borderColor = 'white';
-		streamingTextElement.style.borderRadius = '5px';
-		streamingTextElement.style.overflowY = 'auto';
-		applyLayout();
-		document.body.appendChild(streamingTextElement);
-
-	}
-	createStreamingTextElement();
-
-	// 调整屏幕大小时调整消息窗口
-	function updateStreamingTextElement() {
-
-		// 获取 Maker 的当前屏幕尺寸和浏览器的屏幕尺寸
-		const canvasWidth = Graphics.width;
-		const canvasHeight = Graphics.height;
-		const windowWidth = window.innerWidth;
-		const windowHeight = window.innerHeight;
-		const scaleX = windowWidth / canvasWidth;
-		const scaleY = windowHeight / canvasHeight;
-		const scale = Math.min(scaleX, scaleY);
-		const adjustedWidth = canvasWidth * scale;
-		const adjustedHeight = canvasHeight * scale;
-
-		// 调整消息窗口的宽度和高度以适合屏幕大小
-		let streamingTextHeight = Math.min(200 * scale, 250);
-		streamingTextElement.style.width = `${adjustedWidth - 16}px`;
-		streamingTextElement.style.height = `${streamingTextHeight}px`;
-
-		// 调整字体大小以适合屏幕大小
-		let limitedFontSize = Math.min(Math.max(22 * scale, 16), 28);
-		streamingTextElement.style.fontSize = `${limitedFontSize}px`;
-
-		// 调整消息窗口的位置以适合屏幕大小
-		const topPosition = (windowHeight - adjustedHeight) / 2 + adjustedHeight - streamingTextHeight - 16 * scaleY;
-		streamingTextElement.style.top = `${topPosition}px`;
-		streamingTextElement.style.left = `${(windowWidth - adjustedWidth) / 2}px`;
-		applyLayout();
-
-	}
-
-	// 检查调整大小
-	window.addEventListener('resize', () => {
-		updateStreamingTextElement();
-	});
-
-	// 创建布局模板
-	function applyLayout() {
-		if (streamingTextElement && $gameVariables) {
-			const layoutIndex = $gameVariables.value(layoutVariableId);
-			if (layoutIndex >= 1 && layoutIndex <= layouts.length) {
-				const layout = layouts[layoutIndex - 1];
-
-				let template;
-				switch (layout.template) {
-					case 'design1':
-						template = { color: '#FFF', background: 'rgba(0, 0, 0, 0.7)', boxShadow: '0 0 0 3px #6d83bf inset', borderColor: 'rgb(165, 207, 239)', borderWidth: '3px', borderStyle: 'solid', borderRadius: '5px' };
-						break;
-					case 'design2':
-						template = { color: '#FFF', background: '#000', borderColor: '#FFF', borderWidth: '5px', borderStyle: 'solid', borderRadius: '12px' };
-						break;
-					case 'design3':
-						template = {
-							color: '#FFF',
-							background: 'linear-gradient(180deg, #7b7bd6 0, #7b7bd6 5%,#7373ce 5%, #7373ce 10%,#6b6bc6 10%, #6b6bc6 15%,#6363bd 15%, #6363bd 20%,#5a5ab5 20%, #5a5ab5 25%,#5252ad 25%, #5252ad 30%,#4a4aa5 30%, #4a4aa5 35%,#42429c 35%, #42429c 40%,#393994 40%, #393994 45%,#31318c 45%, #31318c 50%,#292984 50%, #292984 55%,#21217b 55%, #21217b 60%,#181873 60%, #181873 65%,#10106b 65%, #10106b 70%,#080863 70%, #080863 75%,#00005a 75%, #00005a 80%,#000052 80%, #000052 85%,#00004a 85%, #00004a 90%,#000042 90%, #000042 95%,#000039 95%, #000039 100%)',
-							borderColor: '#FFF', borderWidth: '6px', borderStyle: 'ridge', borderRadius: '12px'
-						};
-						break;
-					default:
-						template = layout;
-						break;
-				}
-
-				streamingTextElement.style.color = template.color;
-				streamingTextElement.style.fontSize = template.fontSize;
-				streamingTextElement.style.padding = template.padding;
-				streamingTextElement.style.background = template.background;
-				streamingTextElement.style.boxShadow = template.boxShadow;
-				streamingTextElement.style.margin = template.margin;
-				streamingTextElement.style.borderColor = template.borderColor;
-				streamingTextElement.style.borderWidth = template.borderWidth;
-				streamingTextElement.style.borderStyle = template.borderStyle;
-				streamingTextElement.style.borderRadius = template.borderRadius;
-			}
 		}
 	}
 
